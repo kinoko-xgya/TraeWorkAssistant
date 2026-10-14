@@ -9,9 +9,9 @@ on:
         default: docker_main
         type: string
       image_tag:
-        description: Image tag
-        required: true
-        default: latest
+        description: Image tag (留空 = 自动取 package.json 版本)
+        required: false
+        default: ''
         type: string
       push:
         description: Push image to GHCR
@@ -35,12 +35,24 @@ jobs:
           ref: ${{ inputs.ref }}
           fetch-depth: 0
 
-      - name: Show build info
+      - name: Resolve source version and sha
+        id: src
         run: |
+          SHA="$(git rev-parse HEAD)"
+          VER="$(node -p "require('./package.json').version")"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          # image_tag 留空则用源仓库 package.json 版本，避免人工标签与代码脱节
+          if [ -n "${{ inputs.image_tag }}" ]; then
+            TAG="${{ inputs.image_tag }}"
+          else
+            TAG="$VER"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
           echo "Building ref: ${{ inputs.ref }}"
-          echo "Image tag: ${{ inputs.image_tag }}"
-          echo "SHA: ${{ github.sha }}"
-          uname -a
+          echo "Resolved source sha: $SHA"
+          echo "Source version: $VER"
+          echo "Image tag: $TAG"
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -68,8 +80,8 @@ jobs:
           platforms: linux/arm64
           push: ${{ inputs.push }}
           tags: |
-            ghcr.io/${{ github.repository_owner }}/aiwork-arm:${{ inputs.image_tag }}
-            ghcr.io/${{ github.repository_owner }}/aiwork-arm:sha-${{ github.sha }}
+            ghcr.io/${{ github.repository_owner }}/aiwork-arm:${{ steps.src.outputs.tag }}
+            ghcr.io/${{ github.repository_owner }}/aiwork-arm:sha-${{ steps.src.outputs.sha }}
           cache-from: type=gha,scope=arm64-${{ inputs.ref }}
           cache-to: type=gha,scope=arm64-${{ inputs.ref }},mode=max
           provenance: false
@@ -77,8 +89,9 @@ jobs:
       - name: Image info
         run: |
           echo "=== Built images ==="
-          echo "ghcr.io/${{ github.repository_owner }}/aiwork-arm:${{ inputs.image_tag }}"
-          echo "ghcr.io/${{ github.repository_owner }}/aiwork-arm:sha-${{ github.sha }}"
+          echo "build ref : ${{ inputs.ref }}"
+          echo "image     : ${{ steps.src.outputs.tag }} (source version ${{ steps.src.outputs.version }})"
+          echo "sha tag   : sha-${{ steps.src.outputs.sha }}"
           echo ""
           echo "Pull command:"
-          echo "docker pull ghcr.io/${{ github.repository_owner }}/aiwork-arm:${{ inputs.image_tag }}"
+          echo "docker pull ghcr.io/${{ github.repository_owner }}/aiwork-arm:${{ steps.src.outputs.tag }}"
